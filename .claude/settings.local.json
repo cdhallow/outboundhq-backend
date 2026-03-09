@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install)",
+      "Bash(npm install --force)",
+      "Bash(sudo rm -rf /Users/hd/.npm/_cacache/content-v2/sha512/6c/d5)",
+      "Bash(npm cache clean --force)",
+      "Bash(npm install --cache /tmp/npm-cache-outboundhq)",
+      "Bash(npx tsc --noEmit)"
+    ]
+  }
+}
