@@ -105,6 +105,7 @@ router.post('/voice', async (req: Request, res: Response): Promise<void> => {
   logger.info(`Voice webhook: CallSid=${CallSid} To=${To} callId=${callId}`);
 
   if (!To) {
+    logger.error('Voice webhook received with no To parameter — check browser SDK params');
     res.type('text/xml').send(`<?xml version="1.0" encoding="UTF-8"?>
 <Response><Say>No destination number was provided.</Say></Response>`);
     return;
@@ -112,6 +113,9 @@ router.post('/voice', async (req: Request, res: Response): Promise<void> => {
 
   const backendUrl  = ensureHttps((process.env.BACKEND_URL ?? '').replace(/\/$/, ''));
   const fromNumber  = process.env.TWILIO_PHONE_NUMBER ?? '';
+
+  // Normalise to E.164 as a backend safety net (frontend should send it already formatted)
+  const destination = toE164(To);
 
   // Update our DB record with the real Twilio CallSid now that it exists
   if (callId && CallSid) {
@@ -134,7 +138,7 @@ router.post('/voice', async (req: Request, res: Response): Promise<void> => {
         recordingStatusCallbackMethod="POST">
     <Number statusCallback="${backendUrl}/webhooks/twilio/status"
             statusCallbackMethod="POST"
-            statusCallbackEvent="initiated ringing answered completed">${To}</Number>
+            statusCallbackEvent="initiated ringing answered completed">${destination}</Number>
   </Dial>
 </Response>`;
 
@@ -244,6 +248,15 @@ router.get('/:id/status', async (req: Request, res: Response): Promise<void> => 
 function ensureHttps(url: string): string {
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
   return `https://${url}`;
+}
+
+/** Normalise any phone number to E.164 format required by Twilio. */
+function toE164(phone: string): string {
+  const digits = phone.replace(/\D/g, '');
+  if (phone.startsWith('+')) return `+${digits}`;
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`;
+  return `+${digits}`;
 }
 
 router.get('/twiml', (req: Request, res: Response): void => {

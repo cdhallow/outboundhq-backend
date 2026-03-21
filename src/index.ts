@@ -21,6 +21,8 @@ const PORT = parseInt(process.env.PORT ?? '3000', 10);
 
 app.use(cors());
 app.use(express.json());
+// Twilio webhooks POST as application/x-www-form-urlencoded
+app.use(express.urlencoded({ extended: false }));
 
 // Request logging in non-production environments
 if (process.env.NODE_ENV !== 'production') {
