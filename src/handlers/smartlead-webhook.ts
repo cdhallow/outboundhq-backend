@@ -17,9 +17,9 @@ const logger = createLogger('SmartleadWebhook');
 // ─────────────────────────────────────────────
 
 interface SmartleadEvent {
-  event_type: string;
-  lead_id:    string;      // Smartlead's internal lead ID (= smartlead_lead_id)
-  campaign_id?: string;
+  event_type:  string;
+  lead_id:     string | number;  // Smartlead sends this as a JSON number
+  campaign_id?: string | number;
   [key: string]: unknown;
 }
 
@@ -36,7 +36,12 @@ export async function handleSmartleadWebhook(req: Request, res: Response): Promi
       campaign_id: event.campaign_id,
     });
 
-    switch (event.event_type) {
+    // Smartlead sends UPPER_SNAKE_CASE; normalise to our internal dot-format
+    // so both live webhooks and any future format changes are handled.
+    const normalised = normaliseEventType(event.event_type);
+    logger.debug(`Normalised event type: ${event.event_type} → ${normalised}`);
+
+    switch (normalised) {
       case 'email.sent':
         await handleEmailSent(event);
         break;
@@ -56,7 +61,7 @@ export async function handleSmartleadWebhook(req: Request, res: Response): Promi
         await handleUnsubscribed(event);
         break;
       default:
-        logger.warn(`Unknown event type: ${event.event_type}`);
+        logger.warn(`Unknown event type: ${event.event_type} (normalised: ${normalised})`);
     }
 
     res.status(200).json({ success: true });
@@ -179,19 +184,45 @@ async function handleUnsubscribed(event: SmartleadEvent): Promise<void> {
 // ─────────────────────────────────────────────
 
 /** Fetch enrollment or log a warning and return null (non-fatal). */
-async function requireEnrollment(leadId: string): Promise<Enrollment | null> {
+async function requireEnrollment(leadId: string | number): Promise<Enrollment | null> {
   if (!leadId) {
     logger.warn('Webhook received with no lead_id – skipping');
     return null;
   }
 
-  const enrollment = await findEnrollmentBySmartleadId(leadId);
+  // Smartlead sends lead_id as a JSON number; coerce to string for DB lookup
+  const enrollment = await findEnrollmentBySmartleadId(String(leadId));
   if (!enrollment) {
     logger.warn(`No enrollment found for Smartlead lead ID: ${leadId}`);
     return null;
   }
 
   return enrollment;
+}
+
+/**
+ * Map Smartlead's actual webhook event names to our internal dot-format.
+ * Smartlead docs use UPPER_SNAKE_CASE; older/future formats may differ.
+ * Any unrecognised type passes through as-is (the switch default will warn).
+ */
+function normaliseEventType(raw: string): string {
+  const map: Record<string, string> = {
+    // Smartlead's documented event names
+    EMAIL_SENT:        'email.sent',
+    EMAIL_OPEN:        'email.opened',
+    EMAIL_LINK_CLICK:  'email.clicked',
+    EMAIL_REPLY:       'email.replied',
+    EMAIL_BOUNCE:      'email.bounced',
+    UNSUBSCRIBE:       'email.unsubscribed',
+    // Already-normalised variants (belt-and-suspenders)
+    'email.sent':        'email.sent',
+    'email.opened':      'email.opened',
+    'email.clicked':     'email.clicked',
+    'email.replied':     'email.replied',
+    'email.bounced':     'email.bounced',
+    'email.unsubscribed':'email.unsubscribed',
+  };
+  return map[raw] ?? raw;
 }
 
 /** Strip any potentially large/sensitive fields before storing as metadata. */

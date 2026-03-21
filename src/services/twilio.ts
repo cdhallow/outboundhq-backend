@@ -1,4 +1,5 @@
 import twilio, { Twilio } from 'twilio';
+import AccessToken from 'twilio/lib/jwt/AccessToken';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('TwilioService');
@@ -33,10 +34,15 @@ function getTwilioPhoneNumber(): string {
   return n;
 }
 
+function ensureHttps(url: string): string {
+  if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  return `https://${url}`;
+}
+
 function getBackendUrl(): string {
   const u = process.env.BACKEND_URL;
   if (!u) throw new Error('BACKEND_URL environment variable is not set');
-  return u.replace(/\/$/, ''); // strip trailing slash
+  return ensureHttps(u.replace(/\/$/, '')); // guarantee protocol + strip trailing slash
 }
 
 // ─────────────────────────────────────────────
@@ -132,6 +138,37 @@ export async function getRecordingUrl(recordingSid: string): Promise<string> {
     logger.error(`Failed to fetch recording ${recordingSid}: ${msg}`);
     throw err;
   }
+}
+
+/**
+ * Generate a short-lived Twilio Access Token for the browser Voice SDK.
+ * Requires API Key credentials (different from the main auth token).
+ * Create them at: Twilio Console → Account → API Keys
+ */
+export function generateAccessToken(identity: string): string {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const apiKey     = process.env.TWILIO_API_KEY;
+  const apiSecret  = process.env.TWILIO_API_SECRET;
+  const appSid     = process.env.TWILIO_TWIML_APP_SID;
+
+  if (!accountSid || !apiKey || !apiSecret || !appSid) {
+    throw new Error(
+      'Browser SDK requires: TWILIO_API_KEY, TWILIO_API_SECRET, TWILIO_TWIML_APP_SID'
+    );
+  }
+
+  const token = new AccessToken(accountSid, apiKey, apiSecret, {
+    identity,
+    ttl: 3600, // 1 hour
+  });
+
+  const voiceGrant = new AccessToken.VoiceGrant({
+    outgoingApplicationSid: appSid, // TwiML App that handles outbound calls
+    incomingAllow: true,
+  });
+
+  token.addGrant(voiceGrant);
+  return token.toJwt();
 }
 
 /**
