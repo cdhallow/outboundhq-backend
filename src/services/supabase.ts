@@ -35,10 +35,18 @@ export interface Sequence {
   name: string;
   created_by: string;
   status: 'draft' | 'active' | 'paused' | 'completed';
-  smartlead_campaign_id: string | null;
+  smartlead_campaign_id:  string | null;
+  instantly_campaign_id:  string | null;
   created_at: string;
   updated_at: string;
   sequence_steps: SequenceStep[];
+}
+
+export interface UserProfile {
+  id:         string;
+  first_name: string | null;
+  last_name:  string | null;
+  email:      string | null;
 }
 
 export interface Contact {
@@ -101,6 +109,35 @@ export async function getSequenceWithSteps(sequenceId: string): Promise<Sequence
 
   if (error) throw error;
   return data as Sequence;
+}
+
+/** Fetch a user's profile (name + email) — used to populate from_name/reply_to. */
+export async function getUserProfile(userId: string): Promise<UserProfile> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('id, first_name, last_name, email')
+    .eq('id', userId)
+    .single();
+
+  if (error) throw error;
+  return data as UserProfile;
+}
+
+/** Persist the Instantly campaign ID onto the sequence and flip status → active. */
+export async function updateSequenceInstantlyCampaignId(
+  sequenceId: string,
+  campaignId: string
+): Promise<void> {
+  const { error } = await supabase
+    .from('sequences')
+    .update({
+      instantly_campaign_id: campaignId,
+      status:     'active',
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', sequenceId);
+
+  if (error) throw error;
 }
 
 /** Persist the Smartlead campaign ID onto the sequence and flip status → active. */
@@ -338,6 +375,159 @@ export async function logEngagement(input: LogEngagementInput): Promise<void> {
     }]);
 
   if (error) throw error;
+}
+
+/**
+ * Find an enrollment by Instantly campaign ID + lead email.
+ * Used to match incoming Instantly webhook events to our DB records.
+ */
+export async function findEnrollmentByInstantly(
+  instantlyCampaignId: string,
+  leadEmail: string
+): Promise<Enrollment | null> {
+  // Step 1: find the sequence for this campaign
+  const { data: sequence } = await supabase
+    .from('sequences')
+    .select('id')
+    .eq('instantly_campaign_id', instantlyCampaignId)
+    .maybeSingle();
+
+  if (!sequence) return null;
+
+  // Step 2: find the contact by email
+  const { data: contact } = await supabase
+    .from('contacts')
+    .select('id')
+    .eq('email', leadEmail.toLowerCase())
+    .maybeSingle();
+
+  if (!contact) return null;
+
+  // Step 3: find the active enrollment
+  const { data, error } = await supabase
+    .from('sequence_enrollments')
+    .select('*, sequences(*), contacts(*)')
+    .eq('sequence_id', sequence.id)
+    .eq('contact_id', contact.id)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data as Enrollment | null;
+}
+
+/** Mark a contact as unsubscribed with timestamp. */
+export async function markContactUnsubscribedAt(contactId: string): Promise<void> {
+  const { error } = await supabase
+    .from('contacts')
+    .update({
+      unsubscribed:    true,
+      unsubscribed_at: new Date().toISOString(),
+    } as Record<string, unknown>)
+    .eq('id', contactId);
+
+  if (error) throw error;
+}
+
+// ─────────────────────────────────────────────
+// Email messages
+// ─────────────────────────────────────────────
+
+export interface LogEmailMessageInput {
+  contactId:            string;
+  enrollmentId?:        string | null;
+  sequenceId?:          string | null;
+  assignedSdrId?:       string | null;
+  direction:            'outbound' | 'inbound';
+  subject?:             string | null;
+  bodyText?:            string | null;
+  bodyHtml?:            string | null;
+  fromAddress?:         string | null;
+  toAddress?:           string | null;
+  instantlyMessageId?:  string | null;
+  instantlyCampaignId?: string | null;
+  threadId?:            string | null;
+  status?:              'delivered' | 'pending_review' | 'replied' | 'dismissed';
+  sentAt?:              string | null;
+  receivedAt?:          string | null;
+}
+
+export async function logEmailMessage(input: LogEmailMessageInput): Promise<void> {
+  const { error } = await supabase
+    .from('email_messages')
+    .insert([{
+      contact_id:             input.contactId,
+      enrollment_id:          input.enrollmentId          ?? null,
+      sequence_id:            input.sequenceId            ?? null,
+      assigned_sdr_id:        input.assignedSdrId         ?? null,
+      direction:              input.direction,
+      subject:                input.subject               ?? null,
+      body_text:              input.bodyText              ?? null,
+      body_html:              input.bodyHtml              ?? null,
+      from_address:           input.fromAddress           ?? null,
+      to_address:             input.toAddress             ?? null,
+      instantly_message_id:   input.instantlyMessageId    ?? null,
+      instantly_campaign_id:  input.instantlyCampaignId   ?? null,
+      thread_id:              input.threadId              ?? null,
+      status:                 input.status                ?? 'delivered',
+      sent_at:                input.sentAt                ?? null,
+      received_at:            input.receivedAt            ?? null,
+    }]);
+
+  if (error) throw error;
+}
+
+export interface EmailMessage {
+  id:                   string;
+  contact_id:           string;
+  enrollment_id:        string | null;
+  sequence_id:          string | null;
+  assigned_sdr_id:      string | null;
+  direction:            'outbound' | 'inbound';
+  subject:              string | null;
+  body_text:            string | null;
+  from_address:         string | null;
+  to_address:           string | null;
+  instantly_message_id: string | null;
+  thread_id:            string | null;
+  ai_classification:    string | null;
+  ai_suggested_reply:   string | null;
+  status:               string;
+  sent_at:              string | null;
+  received_at:          string | null;
+}
+
+export async function getContactMessages(
+  contactId: string,
+  limit  = 50,
+  offset = 0
+): Promise<{ messages: EmailMessage[]; total: number }> {
+  const [{ data, error }, { count, error: countError }] = await Promise.all([
+    supabase
+      .from('email_messages')
+      .select(
+        'id, contact_id, enrollment_id, sequence_id, assigned_sdr_id, direction, ' +
+        'subject, body_text, from_address, to_address, instantly_message_id, ' +
+        'thread_id, ai_classification, ai_suggested_reply, status, sent_at, received_at'
+      )
+      .eq('contact_id', contactId)
+      .order('sent_at',     { ascending: false, nullsFirst: false })
+      .order('received_at', { ascending: false, nullsFirst: false })
+      .order('created_at',  { ascending: false })
+      .range(offset, offset + limit - 1),
+
+    supabase
+      .from('email_messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('contact_id', contactId),
+  ]);
+
+  if (error)      throw error;
+  if (countError) throw countError;
+
+  return {
+    messages: (data ?? []) as unknown as EmailMessage[],
+    total:    count ?? 0,
+  };
 }
 
 /** Pull engagement counts for a sequence from our own engagements table. */

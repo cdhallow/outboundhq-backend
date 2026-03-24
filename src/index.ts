@@ -7,7 +7,9 @@ import cors from 'cors';
 import sequencesRouter from './routes/sequences';
 import enrollmentsRouter from './routes/enrollments';
 import callsRouter from './routes/calls';
+import contactsRouter from './routes/contacts';
 import { handleSmartleadWebhook } from './handlers/smartlead-webhook';
+import { handleInstantlyWebhook } from './handlers/instantly-webhook';
 import { handleCallStatus, handleRecording } from './handlers/twilio-webhooks';
 import { createLogger } from './utils/logger';
 
@@ -49,9 +51,16 @@ app.get('/health', (_req: Request, res: Response) => {
 app.use('/api/sequences',   sequencesRouter);
 app.use('/api/enrollments', enrollmentsRouter);
 app.use('/api/calls',       callsRouter);
+app.use('/api/contacts',    contactsRouter);
 
-// Smartlead webhooks
-app.post('/webhooks/smartlead', handleSmartleadWebhook);
+// Instantly webhooks
+app.post('/webhooks/instantly', handleInstantlyWebhook);
+
+// Smartlead webhooks — deprecated, kept live during cutover
+app.post('/webhooks/smartlead', (req, res) => {
+  logger.warn('[DEPRECATED] /webhooks/smartlead received a request — migrating to Instantly');
+  handleSmartleadWebhook(req, res);
+});
 
 // Twilio webhooks
 app.post('/webhooks/twilio/status',    handleCallStatus);
@@ -81,6 +90,10 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(PORT, () => {
   logger.info(`OutboundHQ backend running on port ${PORT}`);
   logger.info(`Environment: ${process.env.NODE_ENV ?? 'development'}`);
+
+  if (!process.env.INSTANTLY_API_KEY) {
+    logger.warn('INSTANTLY_API_KEY is not set — email campaign features will fail on first use');
+  }
 });
 
 export default app;
