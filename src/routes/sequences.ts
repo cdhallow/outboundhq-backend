@@ -7,6 +7,7 @@ import {
 } from '../services/supabase';
 import {
   createCampaign,
+  resumeCampaign,
   getCampaignAnalytics,
   listEmailAccounts,
 } from '../services/instantly';
@@ -88,6 +89,9 @@ router.post('/:id/activate', async (req: Request, res: Response): Promise<void> 
 
     // 7. Persist campaign ID + status in Supabase
     await updateSequenceInstantlyCampaignId(sequenceId, campaignId);
+
+    // 8. Launch the campaign in Instantly so it's ready to send when leads are added
+    await resumeCampaign(campaignId);
 
     logger.info(`Sequence ${sequenceId} activated → Instantly campaign ${campaignId}`);
 

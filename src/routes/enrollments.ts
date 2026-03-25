@@ -12,7 +12,7 @@ import {
   logEmailMessage,
   supabase,
 } from '../services/supabase';
-import { bulkAddLeadsToCampaign, attachEmailAccount, removeLead, createCampaign } from '../services/instantly';
+import { bulkAddLeadsToCampaign, attachEmailAccount, removeLead, createCampaign, resumeCampaign } from '../services/instantly';
 import { replaceVariables } from '../utils/variables';
 import { createLogger } from '../utils/logger';
 
@@ -131,6 +131,9 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
         company_name: contact.company      ?? undefined,
       },
     ]);
+
+    // 6b. Ensure the campaign is active so Instantly will send
+    await resumeCampaign(sequence.instantly_campaign_id);
 
     // 7. Create enrollment record
     const enrollment = await createEnrollment({
