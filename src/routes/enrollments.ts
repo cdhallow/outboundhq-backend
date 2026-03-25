@@ -116,6 +116,11 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
+    if (!contact.email) {
+      res.status(400).json({ error: 'Contact has no email address — cannot enroll in email sequence' });
+      return;
+    }
+
     // 4. Fetch SDR profile for from_name / reply_to
     const profile = await getUserProfile(userId);
 
