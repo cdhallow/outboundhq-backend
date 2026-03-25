@@ -52,19 +52,11 @@ router.post('/:id/activate', async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // 3. Fetch the SDR's profile for from_name / reply_to / sending inbox
-    const profile = await getUserProfile(userId);
-    const fromName       = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'OutboundHQ';
-    const replyTo        = profile.email ?? '';
-    const emailAccountId = profile.instantly_email_account_id;
-
-    if (!emailAccountId) {
-      res.status(400).json({
-        error: 'No Instantly sending inbox configured. Go to Settings and connect your email account.',
-        code:  'INSTANTLY_INBOX_NOT_SET',
-      });
-      return;
-    }
+    // 3. Fetch the SDR's profile for from_name / reply_to
+    //    Inbox is no longer required here — it is selected at enrollment time.
+    const profile  = await getUserProfile(userId);
+    const fromName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'OutboundHQ';
+    const replyTo  = profile.email ?? '';
 
     // 4. Filter to email steps only, ordered by step_number
     const emailSteps = (sequence.sequence_steps ?? [])
@@ -84,14 +76,14 @@ router.post('/:id/activate', async (req: Request, res: Response): Promise<void> 
       delay_days:  step.delay_days ?? 0,
     }));
 
-    // 6. Create Instantly campaign with sending inbox attached
+    // 6. Create Instantly campaign shell — inbox attached at enrollment time
     const campaignId = await createCampaign({
       id:             sequence.id,
       name:           sequence.name,
       steps,
       fromName,
       replyTo,
-      emailAccountId,
+      emailAccountId: null,   // set when first lead enrolls
     });
 
     // 7. Persist campaign ID + status in Supabase

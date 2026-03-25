@@ -54,12 +54,12 @@ export interface SequenceStepInput {
 }
 
 export interface CampaignInput {
-  id:             string;   // OutboundHQ sequence ID (used for deduplication label)
-  name:           string;
-  steps:          SequenceStepInput[];
-  fromName:       string;   // SDR's display name  e.g. "Jane Smith"
-  replyTo:        string;   // SDR's email address
-  emailAccountId: string;   // Instantly email account (inbox) to send from
+  id:              string;         // OutboundHQ sequence ID (used for deduplication label)
+  name:            string;
+  steps:           SequenceStepInput[];
+  fromName:        string;         // SDR's display name  e.g. "Jane Smith"
+  replyTo:         string;         // SDR's email address
+  emailAccountId?: string | null;  // Instantly inbox — optional at activation, set at enrollment
 }
 
 export interface InstantlyEmailAccount {
@@ -101,12 +101,15 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
   // 1. Create the campaign shell with the sending inbox attached
   let campaignId: string;
   try {
-    const { data } = await client.post('/campaigns', {
-      name:             input.name,
-      from_name:        input.fromName,
-      reply_to:         input.replyTo,
-      email_account_ids: [input.emailAccountId],
-    });
+    const payload: Record<string, unknown> = {
+      name:      input.name,
+      from_name: input.fromName,
+      reply_to:  input.replyTo,
+    };
+    if (input.emailAccountId) {
+      payload['email_account_ids'] = [input.emailAccountId];
+    }
+    const { data } = await client.post('/campaigns', payload);
     campaignId = String(data.id ?? data.campaign_id ?? '');
     if (!campaignId) throw new Error('Instantly did not return a campaign ID');
     logger.info(`Instantly campaign created: ${campaignId} (inbox: ${input.emailAccountId})`);
@@ -200,6 +203,22 @@ export async function resumeCampaign(campaignId: string): Promise<void> {
     await client.patch(`/campaigns/${campaignId}`, { status: 'active' });
   } catch (err) {
     handleAxiosError(err, 'resumeCampaign');
+  }
+}
+
+/**
+ * Attach a sending inbox to an existing campaign.
+ * Called at enrollment time when the SDR picks their inbox.
+ */
+export async function attachEmailAccount(campaignId: string, emailAccountId: string): Promise<void> {
+  const client = getClient();
+  logger.info(`Attaching inbox ${emailAccountId} to campaign ${campaignId}`);
+  try {
+    await client.post(`/campaigns/${campaignId}/email-accounts`, {
+      email_account_ids: [emailAccountId],
+    });
+  } catch (err) {
+    handleAxiosError(err, 'attachEmailAccount');
   }
 }
 

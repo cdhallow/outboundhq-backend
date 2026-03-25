@@ -10,7 +10,7 @@ import {
   logEngagement,
   logEmailMessage,
 } from '../services/supabase';
-import { bulkAddLeadsToCampaign } from '../services/instantly';
+import { bulkAddLeadsToCampaign, attachEmailAccount } from '../services/instantly';
 import { replaceVariables } from '../utils/variables';
 import { createLogger } from '../utils/logger';
 
@@ -23,14 +23,20 @@ const logger = createLogger('EnrollmentsRoute');
 // ─────────────────────────────────────────────
 
 router.post('/create', async (req: Request, res: Response): Promise<void> => {
-  const { sequenceId, contactId, userId } = req.body as {
-    sequenceId?: string;
-    contactId?:  string;
-    userId?:     string;
+  const { sequenceId, contactId, userId, emailAccountId } = req.body as {
+    sequenceId?:     string;
+    contactId?:      string;
+    userId?:         string;
+    emailAccountId?: string;  // Instantly inbox selected at enrollment time
   };
 
   if (!sequenceId || !contactId || !userId) {
     res.status(400).json({ error: 'sequenceId, contactId, and userId are required' });
+    return;
+  }
+
+  if (!emailAccountId) {
+    res.status(400).json({ error: 'emailAccountId is required — select a sending inbox to enroll' });
     return;
   }
 
@@ -77,7 +83,10 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
     // 4. Fetch SDR profile for from_name / reply_to
     const profile = await getUserProfile(userId);
 
-    // 5. Add lead to Instantly campaign
+    // 5. Attach the selected inbox to the campaign (idempotent — safe to call each time)
+    await attachEmailAccount(sequence.instantly_campaign_id, emailAccountId);
+
+    // 6. Add lead to Instantly campaign
     await bulkAddLeadsToCampaign(sequence.instantly_campaign_id, [
       {
         email:        contact.email,
@@ -87,7 +96,7 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
       },
     ]);
 
-    // 6. Create enrollment record
+    // 7. Create enrollment record
     const enrollment = await createEnrollment({
       sequenceId,
       contactId,
@@ -95,7 +104,7 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
       smartleadLeadId: '',   // not applicable for Instantly; kept for schema compat
     });
 
-    // 7. Log intent engagement for step 1
+    // 8. Log intent engagement for step 1
     await logEngagement({
       contactId,
       sequenceId,
@@ -108,7 +117,7 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
       },
     });
 
-    // 8. Log the outbound email message (step 1) for conversation threading
+    // 9. Log the outbound email message (step 1) for conversation threading
     const step1 = (sequence.sequence_steps ?? [])
       .filter((s) => s.step_type === 'email')
       .sort((a, b) => a.step_number - b.step_number)[0];
