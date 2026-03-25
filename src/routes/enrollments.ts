@@ -9,8 +9,9 @@ import {
   updateEnrollmentStatus,
   logEngagement,
   logEmailMessage,
+  supabase,
 } from '../services/supabase';
-import { bulkAddLeadsToCampaign, attachEmailAccount } from '../services/instantly';
+import { bulkAddLeadsToCampaign, attachEmailAccount, removeLead } from '../services/instantly';
 import { replaceVariables } from '../utils/variables';
 import { createLogger } from '../utils/logger';
 
@@ -52,14 +53,20 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
     }
 
     if (sequence.status !== 'active') {
+      logger.error(`Sequence ${sequenceId} is not active (status: ${sequence.status})`);
       res.status(400).json({
         error: `Sequence is not active (current status: ${sequence.status}). Activate it first.`,
+        code:  'SEQUENCE_NOT_ACTIVE',
       });
       return;
     }
 
     if (!sequence.instantly_campaign_id) {
-      res.status(400).json({ error: 'Sequence has no linked Instantly campaign. Activate it first.' });
+      logger.error(`Sequence ${sequenceId} has no Instantly campaign ID — activate it first`);
+      res.status(400).json({
+        error: 'Sequence has no linked Instantly campaign. Activate it first.',
+        code:  'CAMPAIGN_NOT_ACTIVATED',
+      });
       return;
     }
 
@@ -165,6 +172,62 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
     }
 
     res.status(500).json({ error: 'Failed to enroll contact', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// POST /api/enrollments/:id/unenroll
+// Removes a contact from the sequence and Instantly campaign entirely.
+// ─────────────────────────────────────────────
+
+router.post('/:id/unenroll', async (req: Request, res: Response): Promise<void> => {
+  const { id: enrollmentId } = req.params;
+
+  logger.info(`Unenroll request for enrollment ${enrollmentId}`);
+
+  try {
+    const enrollment = await getEnrollmentById(enrollmentId);
+
+    if (!enrollment) {
+      res.status(404).json({ error: 'Enrollment not found' });
+      return;
+    }
+
+    if (enrollment.status === 'completed' || enrollment.status === 'unsubscribed') {
+      res.status(409).json({
+        error: `Enrollment is already ${enrollment.status}`,
+      });
+      return;
+    }
+
+    // Look up the contact's email and sequence's Instantly campaign
+    const { data: contact } = await supabase
+      .from('contacts')
+      .select('email')
+      .eq('id', enrollment.contact_id)
+      .single();
+
+    const { data: sequence } = await supabase
+      .from('sequences')
+      .select('instantly_campaign_id')
+      .eq('id', enrollment.sequence_id)
+      .single();
+
+    // Remove from Instantly campaign (non-fatal if not found there)
+    if (contact?.email && sequence?.instantly_campaign_id) {
+      await removeLead(sequence.instantly_campaign_id, contact.email);
+    }
+
+    // Mark as completed in our DB
+    await updateEnrollmentStatus(enrollmentId, 'completed');
+
+    logger.info(`Enrollment ${enrollmentId} unenrolled — contact removed from Instantly campaign`);
+
+    res.status(200).json({ success: true, enrollmentId, status: 'completed' });
+  } catch (err: unknown) {
+    const error = err as Error;
+    logger.error(`Failed to unenroll enrollment ${enrollmentId}`, error);
+    res.status(500).json({ error: 'Failed to unenroll', details: error.message });
   }
 });
 

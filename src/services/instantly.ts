@@ -248,6 +248,27 @@ export async function listEmailAccounts(): Promise<InstantlyEmailAccount[]> {
 }
 
 /**
+ * Remove a lead from an Instantly campaign by email.
+ * Used when unenrolling a contact from a sequence.
+ */
+export async function removeLead(campaignId: string, email: string): Promise<void> {
+  const client = getClient();
+  logger.info(`Removing lead ${email} from Instantly campaign ${campaignId}`);
+  try {
+    await client.delete(`/campaigns/${campaignId}/leads`, {
+      data: { emails: [email] },
+    });
+  } catch (err) {
+    // Non-fatal if the lead doesn't exist in Instantly (e.g. never added)
+    if (err instanceof AxiosError && err.response?.status === 404) {
+      logger.warn(`Lead ${email} not found in Instantly campaign ${campaignId} — skipping`);
+      return;
+    }
+    handleAxiosError(err, 'removeLead');
+  }
+}
+
+/**
  * Fetch aggregated send/open/click/reply counts for a campaign.
  */
 export async function getCampaignAnalytics(campaignId: string): Promise<CampaignAnalytics> {
