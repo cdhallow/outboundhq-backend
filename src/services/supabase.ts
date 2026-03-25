@@ -274,14 +274,15 @@ export interface CreateEnrollmentInput {
 export async function createEnrollment(input: CreateEnrollmentInput): Promise<Enrollment> {
   const { data: enrollment, error } = await supabase
     .from('sequence_enrollments')
-    .insert([{
-      sequence_id:       input.sequenceId,
-      contact_id:        input.contactId,
-      user_id:           input.userId,
-      status:            'active',
-      current_step:      1,
-      enrolled_at:       new Date().toISOString(),
-    }])
+    .upsert([{
+      sequence_id:  input.sequenceId,
+      contact_id:   input.contactId,
+      user_id:      input.userId,
+      status:       'active',
+      current_step: 1,
+      enrolled_at:  new Date().toISOString(),
+      completed_at: null,
+    }], { onConflict: 'sequence_id,contact_id' })
     .select()
     .single();
 
