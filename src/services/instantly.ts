@@ -211,7 +211,7 @@ export async function listEmailAccounts(): Promise<InstantlyEmailAccount[]> {
   const client = getClient();
   logger.info('Fetching Instantly email accounts');
   try {
-    const { data } = await client.get('/email-accounts', {
+    const { data } = await client.get('/accounts', {
       params: { limit: 100 },
     });
     // V2 returns { items: [...] } or a plain array
