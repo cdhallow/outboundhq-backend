@@ -198,7 +198,7 @@ export async function pauseCampaign(campaignId: string): Promise<void> {
   const client = getClient();
   logger.info(`Pausing Instantly campaign ${campaignId}`);
   try {
-    await client.post(`/campaigns/${campaignId}/pause`);
+    await client.post(`/campaigns/${campaignId}/pause`, {});
   } catch (err) {
     handleAxiosError(err, 'pauseCampaign');
   }
@@ -211,7 +211,7 @@ export async function resumeCampaign(campaignId: string): Promise<void> {
   const client = getClient();
   logger.info(`Resuming Instantly campaign ${campaignId}`);
   try {
-    await client.post(`/campaigns/${campaignId}/activate`);
+    await client.post(`/campaigns/${campaignId}/activate`, {});
   } catch (err) {
     handleAxiosError(err, 'resumeCampaign');
   }
