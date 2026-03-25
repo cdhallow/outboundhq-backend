@@ -146,7 +146,6 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
       sequenceId,
       contactId,
       userId,
-      smartleadLeadId: '',   // not applicable for Instantly; kept for schema compat
     });
 
     // 8. Log intent engagement for step 1

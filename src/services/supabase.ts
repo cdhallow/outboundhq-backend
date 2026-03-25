@@ -67,7 +67,6 @@ export interface Enrollment {
   user_id: string;
   status: 'active' | 'paused' | 'completed' | 'bounced' | 'unsubscribed';
   current_step: number;
-  smartlead_lead_id: string | null;
   enrolled_at: string;
   completed_at: string | null;
   sequences?: Sequence;
@@ -270,7 +269,6 @@ export interface CreateEnrollmentInput {
   sequenceId: string;
   contactId: string;
   userId: string;
-  smartleadLeadId: string;
 }
 
 export async function createEnrollment(input: CreateEnrollmentInput): Promise<Enrollment> {
@@ -280,7 +278,6 @@ export async function createEnrollment(input: CreateEnrollmentInput): Promise<En
       sequence_id:       input.sequenceId,
       contact_id:        input.contactId,
       user_id:           input.userId,
-      smartlead_lead_id: input.smartleadLeadId,
       status:            'active',
       current_step:      1,
       enrolled_at:       new Date().toISOString(),
@@ -320,19 +317,6 @@ export async function getEnrollmentById(enrollmentId: string): Promise<Enrollmen
   return data as Enrollment | null;
 }
 
-/** Find an enrollment by the Smartlead lead ID, joining sequences and contacts. */
-export async function findEnrollmentBySmartleadId(
-  smartleadLeadId: string
-): Promise<Enrollment | null> {
-  const { data, error } = await supabase
-    .from('sequence_enrollments')
-    .select('*, sequences(*), contacts(*)')
-    .eq('smartlead_lead_id', smartleadLeadId)
-    .maybeSingle();
-
-  if (error) throw error;
-  return data as Enrollment | null;
-}
 
 export async function updateEnrollmentStatus(
   enrollmentId: string,
