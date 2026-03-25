@@ -355,6 +355,7 @@ export async function logEngagement(input: LogEngagementInput): Promise<void> {
       contact_id:      input.contactId,
       sequence_id:     input.sequenceId,
       enrollment_id:   input.enrollmentId,
+      type:            input.engagementType,
       engagement_type: input.engagementType,
       engaged_at:      new Date().toISOString(),
       metadata:        input.metadata ?? {},
