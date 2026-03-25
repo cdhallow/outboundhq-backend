@@ -120,7 +120,7 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
               friday:    true,
               saturday:  false,
             },
-            timezone: 'America/New_York',
+            timezone: 'America/Detroit',
           },
         ],
       },
