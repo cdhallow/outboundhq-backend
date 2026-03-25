@@ -61,6 +61,14 @@ CREATE INDEX IF NOT EXISTS idx_email_messages_status
 CREATE INDEX IF NOT EXISTS idx_email_messages_instantly_campaign_id
   ON email_messages(instantly_campaign_id);
 
--- 3. contacts: add unsubscribed_at if not present
+-- 3. contacts: add missing columns for bounce/unsubscribe tracking
 ALTER TABLE contacts
-  ADD COLUMN IF NOT EXISTS unsubscribed_at TIMESTAMPTZ;
+  ADD COLUMN IF NOT EXISTS unsubscribed_at  TIMESTAMPTZ;
+ALTER TABLE contacts
+  ADD COLUMN IF NOT EXISTS unsubscribed     BOOLEAN DEFAULT FALSE;
+ALTER TABLE contacts
+  ADD COLUMN IF NOT EXISTS email_invalid    BOOLEAN DEFAULT FALSE;
+
+-- 4. profiles: add Instantly inbox preference
+ALTER TABLE profiles
+  ADD COLUMN IF NOT EXISTS instantly_email_account_id TEXT;

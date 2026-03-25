@@ -404,12 +404,13 @@ export async function findEnrollmentByInstantly(
 
   if (!contact) return null;
 
-  // Step 3: find the active enrollment
+  // Step 3: find the active enrollment (filter by status to avoid ambiguity on re-enrolls)
   const { data, error } = await supabase
     .from('sequence_enrollments')
     .select('*, sequences(*), contacts(*)')
     .eq('sequence_id', sequence.id)
     .eq('contact_id', contact.id)
+    .eq('status', 'active')
     .maybeSingle();
 
   if (error) throw error;
