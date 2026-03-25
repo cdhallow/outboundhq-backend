@@ -8,7 +8,6 @@ import sequencesRouter from './routes/sequences';
 import enrollmentsRouter from './routes/enrollments';
 import callsRouter from './routes/calls';
 import contactsRouter from './routes/contacts';
-import { handleSmartleadWebhook } from './handlers/smartlead-webhook';
 import { handleInstantlyWebhook } from './handlers/instantly-webhook';
 import { handleCallStatus, handleRecording } from './handlers/twilio-webhooks';
 import { createLogger } from './utils/logger';
@@ -55,12 +54,6 @@ app.use('/api/contacts',    contactsRouter);
 
 // Instantly webhooks
 app.post('/webhooks/instantly', handleInstantlyWebhook);
-
-// Smartlead webhooks — deprecated, kept live during cutover
-app.post('/webhooks/smartlead', (req, res) => {
-  logger.warn('[DEPRECATED] /webhooks/smartlead received a request — migrating to Instantly');
-  handleSmartleadWebhook(req, res);
-});
 
 // Twilio webhooks
 app.post('/webhooks/twilio/status',    handleCallStatus);
