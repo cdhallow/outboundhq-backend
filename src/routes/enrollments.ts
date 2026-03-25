@@ -7,11 +7,12 @@ import {
   getActiveEnrollment,
   getEnrollmentById,
   updateEnrollmentStatus,
+  updateSequenceInstantlyCampaignId,
   logEngagement,
   logEmailMessage,
   supabase,
 } from '../services/supabase';
-import { bulkAddLeadsToCampaign, attachEmailAccount, removeLead } from '../services/instantly';
+import { bulkAddLeadsToCampaign, attachEmailAccount, removeLead, createCampaign } from '../services/instantly';
 import { replaceVariables } from '../utils/variables';
 import { createLogger } from '../utils/logger';
 
@@ -62,12 +63,40 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
     }
 
     if (!sequence.instantly_campaign_id) {
-      logger.error(`Sequence ${sequenceId} has no Instantly campaign ID — activate it first`);
-      res.status(400).json({
-        error: 'Sequence has no linked Instantly campaign. Activate it first.',
-        code:  'CAMPAIGN_NOT_ACTIVATED',
+      // Auto-heal: sequence is active but campaign was never created (e.g. migrated from Smartlead).
+      // Create the Instantly campaign now so enrollment can proceed immediately.
+      logger.warn(`Sequence ${sequenceId} missing Instantly campaign — auto-creating now`);
+
+      const autoProfile  = await getUserProfile(userId);
+      const autoFromName = [autoProfile.first_name, autoProfile.last_name].filter(Boolean).join(' ') || 'OutboundHQ';
+      const autoReplyTo  = autoProfile.email ?? '';
+
+      const autoEmailSteps = (sequence.sequence_steps ?? [])
+        .filter((s) => s.step_type === 'email')
+        .sort((a, b) => a.step_number - b.step_number);
+
+      if (autoEmailSteps.length === 0) {
+        res.status(400).json({ error: 'Sequence has no email steps — cannot activate' });
+        return;
+      }
+
+      const autoCampaignId = await createCampaign({
+        id:             sequence.id,
+        name:           sequence.name,
+        steps:          autoEmailSteps.map((s) => ({
+          step_number: s.step_number,
+          subject:     s.subject    ?? '',
+          body:        s.body       ?? '',
+          delay_days:  s.delay_days ?? 0,
+        })),
+        fromName:       autoFromName,
+        replyTo:        autoReplyTo,
+        emailAccountId: null,
       });
-      return;
+
+      await updateSequenceInstantlyCampaignId(sequenceId, autoCampaignId);
+      sequence.instantly_campaign_id = autoCampaignId;
+      logger.info(`Auto-activated sequence ${sequenceId} → Instantly campaign ${autoCampaignId}`);
     }
 
     // 2. Prevent duplicate enrollments
