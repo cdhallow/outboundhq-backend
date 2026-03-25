@@ -128,9 +128,10 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
     await attachEmailAccount(sequence.instantly_campaign_id, emailAccountId);
 
     // 6. Add lead to Instantly campaign
+    logger.info(`Adding lead to Instantly: email="${contact.email}" first="${contact.first_name}" last="${contact.last_name}"`);
     await bulkAddLeadsToCampaign(sequence.instantly_campaign_id, [
       {
-        email:        contact.email,
+        email:        (contact.email ?? '').trim().toLowerCase(),
         first_name:   contact.first_name   ?? undefined,
         last_name:    contact.last_name    ?? undefined,
         company_name: contact.company      ?? undefined,
