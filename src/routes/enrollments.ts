@@ -270,6 +270,111 @@ router.post('/:id/unenroll', async (req: Request, res: Response): Promise<void> 
 });
 
 // ─────────────────────────────────────────────
+// POST /api/enrollments/bulk-unenroll
+// Unenroll multiple contacts by enrollment ID array.
+// Body: { enrollmentIds: string[] }
+// ─────────────────────────────────────────────
+
+router.post('/bulk-unenroll', async (req: Request, res: Response): Promise<void> => {
+  const { enrollmentIds } = req.body as { enrollmentIds?: string[] };
+
+  if (!Array.isArray(enrollmentIds) || enrollmentIds.length === 0) {
+    res.status(400).json({ error: 'enrollmentIds must be a non-empty array' });
+    return;
+  }
+
+  logger.info(`Bulk unenroll: ${enrollmentIds.length} enrollment(s)`);
+
+  const results: { id: string; success: boolean; error?: string }[] = [];
+
+  for (const enrollmentId of enrollmentIds) {
+    try {
+      const enrollment = await getEnrollmentById(enrollmentId);
+      if (!enrollment) {
+        results.push({ id: enrollmentId, success: false, error: 'Not found' });
+        continue;
+      }
+      if (enrollment.status === 'completed' || enrollment.status === 'unsubscribed') {
+        results.push({ id: enrollmentId, success: true, error: `Already ${enrollment.status}` });
+        continue;
+      }
+
+      const { data: contact } = await supabase.from('contacts').select('email').eq('id', enrollment.contact_id).single();
+      const { data: sequence } = await supabase.from('sequences').select('instantly_campaign_id').eq('id', enrollment.sequence_id).single();
+
+      if (contact?.email && sequence?.instantly_campaign_id) {
+        await removeLead(sequence.instantly_campaign_id, contact.email);
+      }
+
+      await updateEnrollmentStatus(enrollmentId, 'completed');
+      results.push({ id: enrollmentId, success: true });
+    } catch (err) {
+      const error = err as Error;
+      logger.error(`Failed to unenroll ${enrollmentId}`, error);
+      results.push({ id: enrollmentId, success: false, error: error.message });
+    }
+  }
+
+  const succeeded = results.filter((r) => r.success).length;
+  logger.info(`Bulk unenroll complete: ${succeeded}/${enrollmentIds.length} succeeded`);
+  res.status(200).json({ success: true, results, succeeded, total: enrollmentIds.length });
+});
+
+// ─────────────────────────────────────────────
+// POST /api/enrollments/unenroll-sequence/:sequenceId
+// Unenroll ALL active contacts from a sequence at once.
+// Useful for testing / resetting a sequence.
+// ─────────────────────────────────────────────
+
+router.post('/unenroll-sequence/:sequenceId', async (req: Request, res: Response): Promise<void> => {
+  const { sequenceId } = req.params;
+
+  logger.info(`Unenroll-all request for sequence ${sequenceId}`);
+
+  try {
+    // Fetch all active enrollments for this sequence
+    const { data: enrollments, error } = await supabase
+      .from('sequence_enrollments')
+      .select('id, contact_id, sequence_id')
+      .eq('sequence_id', sequenceId)
+      .eq('status', 'active');
+
+    if (error) throw error;
+    if (!enrollments || enrollments.length === 0) {
+      res.status(200).json({ success: true, message: 'No active enrollments found', unenrolled: 0 });
+      return;
+    }
+
+    const { data: sequence } = await supabase
+      .from('sequences')
+      .select('instantly_campaign_id')
+      .eq('id', sequenceId)
+      .single();
+
+    let unenrolled = 0;
+    for (const enrollment of enrollments) {
+      try {
+        const { data: contact } = await supabase.from('contacts').select('email').eq('id', enrollment.contact_id).single();
+        if (contact?.email && sequence?.instantly_campaign_id) {
+          await removeLead(sequence.instantly_campaign_id, contact.email);
+        }
+        await updateEnrollmentStatus(enrollment.id, 'completed');
+        unenrolled++;
+      } catch (err) {
+        logger.warn(`Failed to unenroll ${enrollment.id} during bulk unenroll-sequence`, err);
+      }
+    }
+
+    logger.info(`Unenroll-all sequence ${sequenceId}: ${unenrolled}/${enrollments.length} unenrolled`);
+    res.status(200).json({ success: true, unenrolled, total: enrollments.length });
+  } catch (err: unknown) {
+    const error = err as Error;
+    logger.error(`Failed to unenroll-all for sequence ${sequenceId}`, error);
+    res.status(500).json({ error: 'Failed to unenroll sequence', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
 // POST /api/enrollments/:id/pause
 // ─────────────────────────────────────────────
 
