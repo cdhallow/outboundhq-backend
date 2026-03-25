@@ -98,18 +98,18 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
 
   logger.info(`Creating Instantly campaign for sequence "${input.name}" (${input.id})`);
 
-  // 1. Create the campaign shell with the sending inbox attached
+  // Create campaign + sequence steps in a single call (V2 has no separate /sequences endpoint)
   let campaignId: string;
   try {
     const payload: Record<string, unknown> = {
       name:      input.name,
       from_name: input.fromName,
       reply_to:  input.replyTo,
-      // Required by Instantly V2 — full day names per spec, Mon-Fri 8am-5pm ET
+      // Required by Instantly V2 — full day names, Mon-Fri 8am-5pm ET
       campaign_schedule: {
         schedules: [
           {
-            name: 'Default',
+            name:   'Default',
             timing: { from: '08:00', to: '17:00' },
             days: {
               sunday:    false,
@@ -124,39 +124,29 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
           },
         ],
       },
+      // Include steps inline — V2 has no POST /campaigns/{id}/sequences endpoint
+      sequences: [
+        {
+          steps: input.steps.map((step) => ({
+            type:       'email',
+            delay:      step.delay_days,
+            delay_unit: 'days',
+            variants:   [{ subject: step.subject, body: step.body }],
+          })),
+        },
+      ],
     };
+
     if (input.emailAccountId) {
       payload['email_account_ids'] = [input.emailAccountId];
     }
+
     const { data } = await client.post('/campaigns', payload);
     campaignId = String(data.id ?? data.campaign_id ?? '');
     if (!campaignId) throw new Error('Instantly did not return a campaign ID');
-    logger.info(`Instantly campaign created: ${campaignId} (inbox: ${input.emailAccountId})`);
+    logger.info(`Instantly campaign created: ${campaignId} with ${input.steps.length} step(s)`);
   } catch (err) {
     handleAxiosError(err, 'createCampaign');
-  }
-
-  // 2. Add sequence steps — delay is in DAYS per V2 spec (not hours)
-  const sequences = [
-    {
-      steps: input.steps.map((step) => ({
-        type:  'email',
-        delay: step.delay_days,
-        variants: [
-          {
-            subject: step.subject,
-            body:    step.body,
-          },
-        ],
-      })),
-    },
-  ];
-
-  try {
-    await client.post(`/campaigns/${campaignId!}/sequences`, { sequences });
-    logger.info(`Added ${input.steps.length} step(s) to Instantly campaign ${campaignId}`);
-  } catch (err) {
-    handleAxiosError(err, 'addSequenceSteps');
   }
 
   return campaignId!;
