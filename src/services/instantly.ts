@@ -169,7 +169,7 @@ export async function bulkAddLeadsToCampaign(
     const batch = leads.slice(i, i + LEAD_BATCH_SIZE);
 
     try {
-      await client.post('/leads', {
+      await client.post('/leads/bulk', {
         campaign_id:         campaignId,
         skip_if_in_campaign: true,
         leads: batch.map((l) => ({
