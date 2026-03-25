@@ -18,21 +18,25 @@ const logger = createLogger('InstantlyWebhook');
 // ─────────────────────────────────────────────
 
 interface InstantlyEvent {
-  event_type:         string;
-  campaign_id?:       string;
+  event_type:          string;
+  campaign_id?:        string;
+  campaign_name?:      string;
   // Lead/contact identification
-  lead_email?:        string;
-  email?:             string;         // some events use this key instead
-  // Reply-specific fields
-  id?:                string;         // instantly_message_id
-  subject?:           string;
-  body?: {
-    text?: string;
-    html?: string;
-  };
-  from_address_email?: string;        // sender's email on inbound
+  lead_email?:         string;
+  email?:              string;        // fallback alias used in some events
+  email_account?:      string;        // sending account
+  // Reply-specific fields (V2 spec)
+  email_id?:           string;        // message ID
+  email_subject?:      string;        // original email subject
+  reply_subject?:      string;        // subject of the reply
+  reply_text?:         string;        // plain-text reply body
+  reply_html?:         string;        // HTML reply body
+  reply_text_snippet?: string;        // short preview
   thread_id?:          string;
   timestamp?:          string;
+  // Step info
+  step?:               number;
+  variant?:            number;
   [key: string]: unknown;
 }
 
@@ -56,7 +60,8 @@ export async function handleInstantlyWebhook(req: Request, res: Response): Promi
       case 'email_opened':
         await handleEmailOpened(event);
         break;
-      case 'email_clicked':
+      case 'email_clicked':   // legacy alias
+      case 'link_clicked':    // V2 canonical name
         await handleEmailClicked(event);
         break;
       case 'email_bounced':
@@ -82,7 +87,7 @@ export async function handleInstantlyWebhook(req: Request, res: Response): Promi
 // ─────────────────────────────────────────────
 
 async function handleReplyReceived(event: InstantlyEvent): Promise<void> {
-  const leadEmail  = normaliseEmail(event.lead_email ?? event.email ?? event.from_address_email ?? '');
+  const leadEmail  = normaliseEmail(event.lead_email ?? event.email ?? '');
   const campaignId = event.campaign_id ?? '';
 
   if (!leadEmail || !campaignId) {
@@ -97,21 +102,22 @@ async function handleReplyReceived(event: InstantlyEvent): Promise<void> {
   }
 
   // Store the inbound message for conversation threading
+  // V2 field names: reply_text, reply_html, reply_subject, email_id
   await logEmailMessage({
     contactId:            enrollment?.contact_id  ?? await findOrSkipContactId(leadEmail),
     enrollmentId:         enrollment?.id          ?? null,
     sequenceId:           enrollment?.sequence_id ?? null,
     direction:            'inbound',
-    subject:              event.subject           ?? null,
-    bodyText:             event.body?.text        ?? null,
-    bodyHtml:             event.body?.html        ?? null,
+    subject:              event.reply_subject ?? event.email_subject ?? null,
+    bodyText:             event.reply_text    ?? null,
+    bodyHtml:             event.reply_html    ?? null,
     fromAddress:          leadEmail,
-    toAddress:            null,
-    instantlyMessageId:   event.id                ?? null,
+    toAddress:            event.email_account ?? null,
+    instantlyMessageId:   event.email_id      ?? null,
     instantlyCampaignId:  campaignId,
-    threadId:             event.thread_id         ?? null,
+    threadId:             event.thread_id     ?? null,
     status:               'pending_review',
-    receivedAt:           event.timestamp         ?? new Date().toISOString(),
+    receivedAt:           event.timestamp     ?? new Date().toISOString(),
   });
 
   if (!enrollment) return;
@@ -123,9 +129,9 @@ async function handleReplyReceived(event: InstantlyEvent): Promise<void> {
       enrollmentId:   enrollment.id,
       engagementType: 'email_replied',
       metadata:       {
-        instantly_message_id:  event.id,
+        instantly_message_id:  event.email_id,
         instantly_campaign_id: campaignId,
-        subject:               event.subject,
+        subject:               event.reply_subject ?? event.email_subject,
         thread_id:             event.thread_id,
       },
     }),

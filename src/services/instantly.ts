@@ -105,20 +105,20 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
       name:      input.name,
       from_name: input.fromName,
       reply_to:  input.replyTo,
-      // Required by Instantly V2 — default to Mon-Fri 8am-5pm ET
+      // Required by Instantly V2 — full day names per spec, Mon-Fri 8am-5pm ET
       campaign_schedule: {
         schedules: [
           {
             name: 'Default',
             timing: { from: '08:00', to: '17:00' },
             days: {
-              sun: false,
-              mon: true,
-              tue: true,
-              wed: true,
-              thu: true,
-              fri: true,
-              sat: false,
+              sunday:    false,
+              monday:    true,
+              tuesday:   true,
+              wednesday: true,
+              thursday:  true,
+              friday:    true,
+              saturday:  false,
             },
             timezone: 'America/New_York',
           },
@@ -136,12 +136,12 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
     handleAxiosError(err, 'createCampaign');
   }
 
-  // 2. Add sequence steps
+  // 2. Add sequence steps — delay is in DAYS per V2 spec (not hours)
   const sequences = [
     {
       steps: input.steps.map((step) => ({
         type:  'email',
-        delay: step.delay_days * 24, // Instantly expects delay in hours
+        delay: step.delay_days,
         variants: [
           {
             subject: step.subject,
@@ -174,13 +174,15 @@ export async function bulkAddLeadsToCampaign(
 
   logger.info(`Adding ${leads.length} lead(s) to Instantly campaign ${campaignId}`);
 
-  // Split into batches of LEAD_BATCH_SIZE
+  // V2 endpoint: POST /leads with campaign_id in body, `leads` array (not `lead_list`)
   for (let i = 0; i < leads.length; i += LEAD_BATCH_SIZE) {
     const batch = leads.slice(i, i + LEAD_BATCH_SIZE);
 
     try {
-      await client.post(`/campaigns/${campaignId}/leads`, {
-        lead_list: batch.map((l) => ({
+      await client.post('/leads', {
+        campaign_id:         campaignId,
+        skip_if_in_campaign: true,
+        leads: batch.map((l) => ({
           email:           l.email,
           first_name:      l.first_name      ?? '',
           last_name:       l.last_name       ?? '',
@@ -206,7 +208,7 @@ export async function pauseCampaign(campaignId: string): Promise<void> {
   const client = getClient();
   logger.info(`Pausing Instantly campaign ${campaignId}`);
   try {
-    await client.patch(`/campaigns/${campaignId}`, { status: 'paused' });
+    await client.post(`/campaigns/${campaignId}/pause`);
   } catch (err) {
     handleAxiosError(err, 'pauseCampaign');
   }
@@ -219,7 +221,7 @@ export async function resumeCampaign(campaignId: string): Promise<void> {
   const client = getClient();
   logger.info(`Resuming Instantly campaign ${campaignId}`);
   try {
-    await client.patch(`/campaigns/${campaignId}`, { status: 'active' });
+    await client.post(`/campaigns/${campaignId}/activate`);
   } catch (err) {
     handleAxiosError(err, 'resumeCampaign');
   }
@@ -233,7 +235,8 @@ export async function attachEmailAccount(campaignId: string, emailAccountId: str
   const client = getClient();
   logger.info(`Attaching inbox ${emailAccountId} to campaign ${campaignId}`);
   try {
-    await client.post(`/campaigns/${campaignId}/email-accounts`, {
+    // V2: update campaign with email_account_ids via PATCH
+    await client.patch(`/campaigns/${campaignId}`, {
       email_account_ids: [emailAccountId],
     });
   } catch (err) {
@@ -274,8 +277,9 @@ export async function removeLead(campaignId: string, email: string): Promise<voi
   const client = getClient();
   logger.info(`Removing lead ${email} from Instantly campaign ${campaignId}`);
   try {
-    await client.delete(`/campaigns/${campaignId}/leads`, {
-      data: { emails: [email] },
+    // V2: DELETE /leads with campaign_id + email in body
+    await client.delete('/leads', {
+      data: { campaign_id: campaignId, email },
     });
   } catch (err) {
     // Non-fatal if the lead doesn't exist in Instantly (e.g. never added)
