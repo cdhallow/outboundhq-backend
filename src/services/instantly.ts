@@ -105,6 +105,25 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
       name:      input.name,
       from_name: input.fromName,
       reply_to:  input.replyTo,
+      // Required by Instantly V2 — default to Mon-Fri 8am-5pm ET
+      campaign_schedule: {
+        schedules: [
+          {
+            name: 'Default',
+            timing: { from: '08:00', to: '17:00' },
+            days: {
+              sun: false,
+              mon: true,
+              tue: true,
+              wed: true,
+              thu: true,
+              fri: true,
+              sat: false,
+            },
+            timezone: 'America/New_York',
+          },
+        ],
+      },
     };
     if (input.emailAccountId) {
       payload['email_account_ids'] = [input.emailAccountId];
