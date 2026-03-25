@@ -43,10 +43,11 @@ export interface Sequence {
 }
 
 export interface UserProfile {
-  id:         string;
-  first_name: string | null;
-  last_name:  string | null;
-  email:      string | null;
+  id:                        string;
+  first_name:                string | null;
+  last_name:                 string | null;
+  email:                     string | null;
+  instantly_email_account_id: string | null;
 }
 
 export interface Contact {
@@ -115,7 +116,7 @@ export async function getSequenceWithSteps(sequenceId: string): Promise<Sequence
 export async function getUserProfile(userId: string): Promise<UserProfile> {
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, first_name, last_name, email')
+    .select('id, first_name, last_name, email, instantly_email_account_id')
     .eq('id', userId)
     .single();
 

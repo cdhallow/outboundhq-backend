@@ -54,11 +54,20 @@ export interface SequenceStepInput {
 }
 
 export interface CampaignInput {
-  id:       string;   // OutboundHQ sequence ID (used for deduplication label)
-  name:     string;
-  steps:    SequenceStepInput[];
-  fromName: string;   // SDR's display name  e.g. "Jane Smith"
-  replyTo:  string;   // SDR's email address
+  id:             string;   // OutboundHQ sequence ID (used for deduplication label)
+  name:           string;
+  steps:          SequenceStepInput[];
+  fromName:       string;   // SDR's display name  e.g. "Jane Smith"
+  replyTo:        string;   // SDR's email address
+  emailAccountId: string;   // Instantly email account (inbox) to send from
+}
+
+export interface InstantlyEmailAccount {
+  id:             string;
+  email:          string;
+  firstName?:     string;
+  lastName?:      string;
+  status?:        string;
 }
 
 export interface LeadInput {
@@ -89,17 +98,18 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
 
   logger.info(`Creating Instantly campaign for sequence "${input.name}" (${input.id})`);
 
-  // 1. Create the campaign shell
+  // 1. Create the campaign shell with the sending inbox attached
   let campaignId: string;
   try {
     const { data } = await client.post('/campaigns', {
-      name:       input.name,
-      from_name:  input.fromName,
-      reply_to:   input.replyTo,
+      name:             input.name,
+      from_name:        input.fromName,
+      reply_to:         input.replyTo,
+      email_account_ids: [input.emailAccountId],
     });
     campaignId = String(data.id ?? data.campaign_id ?? '');
     if (!campaignId) throw new Error('Instantly did not return a campaign ID');
-    logger.info(`Instantly campaign created: ${campaignId}`);
+    logger.info(`Instantly campaign created: ${campaignId} (inbox: ${input.emailAccountId})`);
   } catch (err) {
     handleAxiosError(err, 'createCampaign');
   }
@@ -190,6 +200,31 @@ export async function resumeCampaign(campaignId: string): Promise<void> {
     await client.patch(`/campaigns/${campaignId}`, { status: 'active' });
   } catch (err) {
     handleAxiosError(err, 'resumeCampaign');
+  }
+}
+
+/**
+ * List all email accounts (sending inboxes) connected to this Instantly workspace.
+ * Used by the SDR settings screen in Lovable to pick their sending inbox.
+ */
+export async function listEmailAccounts(): Promise<InstantlyEmailAccount[]> {
+  const client = getClient();
+  logger.info('Fetching Instantly email accounts');
+  try {
+    const { data } = await client.get('/email-accounts', {
+      params: { limit: 100 },
+    });
+    // V2 returns { items: [...] } or a plain array
+    const accounts: Array<Record<string, unknown>> = Array.isArray(data) ? data : (data?.items ?? []);
+    return accounts.map((a) => ({
+      id:        String(a.id ?? a.email_account_id ?? ''),
+      email:     String(a.email ?? ''),
+      firstName: a.first_name ? String(a.first_name) : undefined,
+      lastName:  a.last_name  ? String(a.last_name)  : undefined,
+      status:    a.status     ? String(a.status)     : undefined,
+    }));
+  } catch (err) {
+    handleAxiosError(err, 'listEmailAccounts');
   }
 }
 

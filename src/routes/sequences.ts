@@ -8,6 +8,7 @@ import {
 import {
   createCampaign,
   getCampaignAnalytics,
+  listEmailAccounts,
 } from '../services/instantly';
 import { createLogger } from '../utils/logger';
 
@@ -51,10 +52,19 @@ router.post('/:id/activate', async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    // 3. Fetch the SDR's profile for from_name / reply_to
+    // 3. Fetch the SDR's profile for from_name / reply_to / sending inbox
     const profile = await getUserProfile(userId);
-    const fromName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'OutboundHQ';
-    const replyTo  = profile.email ?? '';
+    const fromName       = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || 'OutboundHQ';
+    const replyTo        = profile.email ?? '';
+    const emailAccountId = profile.instantly_email_account_id;
+
+    if (!emailAccountId) {
+      res.status(400).json({
+        error: 'No Instantly sending inbox configured. Go to Settings and connect your email account.',
+        code:  'INSTANTLY_INBOX_NOT_SET',
+      });
+      return;
+    }
 
     // 4. Filter to email steps only, ordered by step_number
     const emailSteps = (sequence.sequence_steps ?? [])
@@ -74,13 +84,14 @@ router.post('/:id/activate', async (req: Request, res: Response): Promise<void> 
       delay_days:  step.delay_days ?? 0,
     }));
 
-    // 6. Create Instantly campaign
+    // 6. Create Instantly campaign with sending inbox attached
     const campaignId = await createCampaign({
-      id:       sequence.id,
-      name:     sequence.name,
+      id:             sequence.id,
+      name:           sequence.name,
       steps,
       fromName,
       replyTo,
+      emailAccountId,
     });
 
     // 7. Persist campaign ID + status in Supabase
@@ -148,6 +159,23 @@ router.get('/:id/stats', async (req: Request, res: Response): Promise<void> => {
     const error = err as Error;
     logger.error(`Failed to fetch stats for sequence ${sequenceId}`, error);
     res.status(500).json({ error: 'Failed to fetch sequence stats', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/sequences/email-accounts
+// Lists Instantly email accounts available in this workspace.
+// Lovable uses this to populate the inbox picker in SDR settings.
+// ─────────────────────────────────────────────
+
+router.get('/email-accounts', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const accounts = await listEmailAccounts();
+    res.status(200).json({ accounts });
+  } catch (err: unknown) {
+    const error = err as Error;
+    logger.error('Failed to list Instantly email accounts', error);
+    res.status(500).json({ error: 'Failed to fetch email accounts', details: error.message });
   }
 });
 
