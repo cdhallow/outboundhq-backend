@@ -105,20 +105,20 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
       name:      input.name,
       from_name: input.fromName,
       reply_to:  input.replyTo,
-      // Required by Instantly V2 — full day names, Mon-Fri 8am-5pm ET
+      // Required by Instantly V2 — numeric string keys 0=Sun,1=Mon,...,6=Sat
       campaign_schedule: {
         schedules: [
           {
             name:   'Default',
             timing: { from: '08:00', to: '17:00' },
             days: {
-              sunday:    false,
-              monday:    true,
-              tuesday:   true,
-              wednesday: true,
-              thursday:  true,
-              friday:    true,
-              saturday:  false,
+              '0': false, // Sunday
+              '1': true,  // Monday
+              '2': true,  // Tuesday
+              '3': true,  // Wednesday
+              '4': true,  // Thursday
+              '5': true,  // Friday
+              '6': false, // Saturday
             },
             timezone: 'America/Detroit',
           },
