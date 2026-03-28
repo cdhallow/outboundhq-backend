@@ -327,17 +327,24 @@ export async function sendEmailReply(params: {
 
 /**
  * Fetch aggregated send/open/click/reply counts for a campaign.
+ * V2 endpoint: GET /campaigns/analytics?id=<campaign_id>
+ * (NOT /campaigns/{id}/analytics — that path does not exist in V2)
  */
 export async function getCampaignAnalytics(campaignId: string): Promise<CampaignAnalytics> {
   const client = getClient();
   logger.info(`Fetching analytics for Instantly campaign ${campaignId}`);
   try {
-    const { data } = await client.get(`/campaigns/${campaignId}/analytics`);
+    const { data } = await client.get('/campaigns/analytics', {
+      params: {
+        id:                          campaignId,
+        exclude_total_leads_count:   true,   // skip slow count, not needed here
+      },
+    });
     return {
-      sent:    data?.total_sent    ?? data?.sent    ?? 0,
-      opened:  data?.total_opened  ?? data?.opened  ?? 0,
-      clicked: data?.total_clicked ?? data?.clicked ?? 0,
-      replied: data?.total_replied ?? data?.replied ?? 0,
+      sent:    data?.sent           ?? 0,
+      opened:  data?.unique_opened  ?? data?.opened  ?? 0,
+      clicked: data?.unique_clicks  ?? data?.clicks  ?? 0,
+      replied: data?.unique_replies ?? data?.replies ?? 0,
     };
   } catch (err) {
     handleAxiosError(err, 'getCampaignAnalytics');

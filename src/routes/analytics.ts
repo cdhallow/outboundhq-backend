@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../services/supabase';
+import { getCampaignAnalytics } from '../services/instantly';
 import { createLogger } from '../utils/logger';
 
 const router = Router();
@@ -86,24 +87,33 @@ router.get('/overview', async (req: Request, res: Response): Promise<void> => {
       .select('id', { count: 'exact', head: true })
       .eq('lead_tier', 'hot');
 
-    // ── Instantly campaign-level stats from our own engagements table ────────
-    // (Instantly V2 API does not expose a /campaigns/{id}/analytics endpoint)
+    // ── Instantly campaign-level stats (best-effort — won't fail the whole response) ──
+    // V2 endpoint: GET /campaigns/analytics?id=<campaign_id>
     let instantlyCampaignStats = null;
     try {
-      const { data: engRows } = await supabase
-        .from('engagements')
-        .select('engagement_type');
+      const { data: sequences } = await supabase
+        .from('sequences')
+        .select('instantly_campaign_id')
+        .eq('status', 'active')
+        .not('instantly_campaign_id', 'is', null);
 
-      if (engRows) {
-        instantlyCampaignStats = {
-          sent:    engRows.filter((e) => e.engagement_type === 'email_sent').length,
-          opened:  engRows.filter((e) => e.engagement_type === 'email_opened').length,
-          clicked: engRows.filter((e) => e.engagement_type === 'email_clicked').length,
-          replied: engRows.filter((e) => e.engagement_type === 'email_replied').length,
-        };
+      if (sequences && sequences.length > 0) {
+        const allStats = await Promise.all(
+          sequences.map((s) => getCampaignAnalytics(s.instantly_campaign_id!))
+        );
+
+        instantlyCampaignStats = allStats.reduce(
+          (acc, s) => ({
+            sent:    acc.sent    + (s?.sent    ?? 0),
+            opened:  acc.opened  + (s?.opened  ?? 0),
+            clicked: acc.clicked + (s?.clicked ?? 0),
+            replied: acc.replied + (s?.replied ?? 0),
+          }),
+          { sent: 0, opened: 0, clicked: 0, replied: 0 }
+        );
       }
     } catch (campaignErr) {
-      logger.warn('Could not fetch campaign analytics from engagements table', campaignErr);
+      logger.warn('Could not fetch Instantly campaign analytics', campaignErr);
     }
 
     res.status(200).json({
