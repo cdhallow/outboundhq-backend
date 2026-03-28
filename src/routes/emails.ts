@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { sendEmailReply, listEmailAccounts } from '../services/instantly';
+import { sendEmailReply, getCachedEmailAccounts } from '../services/instantly';
 import { logEmailMessage, supabase } from '../services/supabase';
 import { createLogger } from '../utils/logger';
 
@@ -123,7 +123,7 @@ router.get('/thread/:contactId', async (req: Request, res: Response): Promise<vo
 
 router.get('/accounts', async (_req: Request, res: Response): Promise<void> => {
   try {
-    const accounts = await listEmailAccounts();
+    const accounts = await getCachedEmailAccounts();
     res.status(200).json({ accounts });
   } catch (err: unknown) {
     const error = err as Error;

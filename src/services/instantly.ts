@@ -12,9 +12,12 @@ const LEAD_BATCH_SIZE = 400; // Instantly max per request
 
 let _client: AxiosInstance | null = null;
 
-// Cache email accounts for 10 minutes to avoid fetching on every enrollment
-let _emailAccountsCache: { ids: string[]; expiresAt: number } | null = null;
 const EMAIL_ACCOUNTS_TTL_MS = 10 * 60 * 1000;
+
+// Cache full account objects (used by the /api/emails/accounts endpoint)
+let _emailAccountsCache: { accounts: InstantlyEmailAccount[]; expiresAt: number } | null = null;
+// Cache just IDs (used internally for campaign creation)
+let _emailAccountIdsCache: { ids: string[]; expiresAt: number } | null = null;
 
 function getClient(): AxiosInstance {
   if (_client) return _client;
@@ -243,13 +246,23 @@ export async function attachEmailAccount(campaignId: string, emailAccountId: str
  * List all email accounts (sending inboxes) connected to this Instantly workspace.
  * Used by the SDR settings screen in Lovable to pick their sending inbox.
  */
-async function getCachedEmailAccountIds(): Promise<string[]> {
+/** Returns cached full account list — used by the /api/emails/accounts endpoint. */
+export async function getCachedEmailAccounts(): Promise<InstantlyEmailAccount[]> {
   if (_emailAccountsCache && Date.now() < _emailAccountsCache.expiresAt) {
-    return _emailAccountsCache.ids;
+    return _emailAccountsCache.accounts;
   }
   const accounts = await listEmailAccounts();
+  _emailAccountsCache = { accounts, expiresAt: Date.now() + EMAIL_ACCOUNTS_TTL_MS };
+  return accounts;
+}
+
+async function getCachedEmailAccountIds(): Promise<string[]> {
+  if (_emailAccountIdsCache && Date.now() < _emailAccountIdsCache.expiresAt) {
+    return _emailAccountIdsCache.ids;
+  }
+  const accounts = await getCachedEmailAccounts();
   const ids = accounts.map((a) => a.id).filter(Boolean);
-  _emailAccountsCache = { ids, expiresAt: Date.now() + EMAIL_ACCOUNTS_TTL_MS };
+  _emailAccountIdsCache = { ids, expiresAt: Date.now() + EMAIL_ACCOUNTS_TTL_MS };
   return ids;
 }
 
