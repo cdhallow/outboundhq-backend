@@ -64,11 +64,21 @@ export async function handleInstantlyWebhook(req: Request, res: Response): Promi
       case 'link_clicked':    // V2 canonical name
         await handleEmailClicked(event);
         break;
+      case 'email_sent':
+        await handleEmailSent(event);
+        break;
       case 'email_bounced':
         await handleEmailBounced(event);
         break;
       case 'lead_unsubscribed':
         await handleLeadUnsubscribed(event);
+        break;
+      case 'lead_interested':
+        await handleLeadInterested(event);
+        break;
+      case 'campaign_completed':
+      case 'campaign_completed_for_lead_without_reply':
+        await handleCampaignCompleted(event);
         break;
       default:
         logger.warn(`Unhandled Instantly event type: ${event.event_type}`);
@@ -198,6 +208,49 @@ async function handleEmailBounced(event: InstantlyEvent): Promise<void> {
   ]);
 
   logger.info(`email_bounced: enrollment ${enrollment.id} bounced, contact flagged`);
+}
+
+async function handleEmailSent(event: InstantlyEvent): Promise<void> {
+  const enrollment = await requireEnrollment(event);
+  if (!enrollment) return;
+
+  await logEngagement({
+    contactId:      enrollment.contact_id,
+    sequenceId:     enrollment.sequence_id,
+    enrollmentId:   enrollment.id,
+    engagementType: 'email_sent',
+    metadata:       sanitise(event),
+  });
+
+  logger.info(`email_sent: logged for enrollment ${enrollment.id}`);
+}
+
+async function handleLeadInterested(event: InstantlyEvent): Promise<void> {
+  const enrollment = await requireEnrollment(event);
+  if (!enrollment) return;
+
+  await Promise.all([
+    logEngagement({
+      contactId:      enrollment.contact_id,
+      sequenceId:     enrollment.sequence_id,
+      enrollmentId:   enrollment.id,
+      engagementType: 'email_replied',
+      metadata:       { ...sanitise(event), instantly_classification: 'interested' },
+    }),
+    updateContactEngagementScore(enrollment.contact_id, 50),
+    updateContactLeadTier(enrollment.contact_id),
+  ]);
+
+  logger.info(`lead_interested: +50 pts, contact marked hot for enrollment ${enrollment.id}`);
+}
+
+async function handleCampaignCompleted(event: InstantlyEvent): Promise<void> {
+  const enrollment = await requireEnrollment(event);
+  if (!enrollment) return;
+
+  await updateEnrollmentStatus(enrollment.id, 'completed');
+
+  logger.info(`campaign_completed: enrollment ${enrollment.id} marked completed`);
 }
 
 async function handleLeadUnsubscribed(event: InstantlyEvent): Promise<void> {

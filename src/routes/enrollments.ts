@@ -81,17 +81,16 @@ router.post('/create', async (req: Request, res: Response): Promise<void> => {
       }
 
       const autoCampaignId = await createCampaign({
-        id:             sequence.id,
-        name:           sequence.name,
-        steps:          autoEmailSteps.map((s) => ({
+        id:       sequence.id,
+        name:     sequence.name,
+        steps:    autoEmailSteps.map((s) => ({
           step_number: s.step_number,
           subject:     s.subject    ?? '',
           body:        s.body       ?? '',
           delay_days:  s.delay_days ?? 0,
         })),
-        fromName:       autoFromName,
-        replyTo:        autoReplyTo,
-        emailAccountId: null,
+        fromName: autoFromName,
+        replyTo:  autoReplyTo,
       });
 
       await updateSequenceInstantlyCampaignId(sequenceId, autoCampaignId);

@@ -12,6 +12,10 @@ const LEAD_BATCH_SIZE = 400; // Instantly max per request
 
 let _client: AxiosInstance | null = null;
 
+// Cache email accounts for 10 minutes to avoid fetching on every enrollment
+let _emailAccountsCache: { ids: string[]; expiresAt: number } | null = null;
+const EMAIL_ACCOUNTS_TTL_MS = 10 * 60 * 1000;
+
 function getClient(): AxiosInstance {
   if (_client) return _client;
 
@@ -54,12 +58,11 @@ export interface SequenceStepInput {
 }
 
 export interface CampaignInput {
-  id:              string;         // OutboundHQ sequence ID (used for deduplication label)
-  name:            string;
-  steps:           SequenceStepInput[];
-  fromName:        string;         // SDR's display name  e.g. "Jane Smith"
-  replyTo:         string;         // SDR's email address
-  emailAccountId?: string | null;  // Instantly inbox — optional at activation, set at enrollment
+  id:       string;         // OutboundHQ sequence ID (used for deduplication label)
+  name:     string;
+  steps:    SequenceStepInput[];
+  fromName: string;         // SDR's display name  e.g. "Jane Smith"
+  replyTo:  string;         // SDR's email address
 }
 
 export interface InstantlyEmailAccount {
@@ -98,6 +101,10 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
 
   logger.info(`Creating Instantly campaign for sequence "${input.name}" (${input.id})`);
 
+  // Fetch all active inboxes (cached) so every campaign is ready to send immediately
+  const emailAccountIds = await getCachedEmailAccountIds();
+  logger.info(`Attaching ${emailAccountIds.length} inbox(es) to new campaign`);
+
   // Create campaign + sequence steps in a single call (V2 has no separate /sequences endpoint)
   let campaignId: string;
   try {
@@ -105,6 +112,8 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
       name:      input.name,
       from_name: input.fromName,
       reply_to:  input.replyTo,
+      // Attach all workspace inboxes upfront — no per-enrollment attachment needed
+      email_account_ids: emailAccountIds,
       // Required by Instantly V2 — numeric string keys 0=Sun,1=Mon,...,6=Sat
       campaign_schedule: {
         schedules: [
@@ -136,10 +145,6 @@ export async function createCampaign(input: CampaignInput): Promise<string> {
         },
       ],
     };
-
-    if (input.emailAccountId) {
-      payload['email_account_ids'] = [input.emailAccountId];
-    }
 
     const { data } = await client.post('/campaigns', payload);
     campaignId = String(data.id ?? data.campaign_id ?? '');
@@ -238,6 +243,16 @@ export async function attachEmailAccount(campaignId: string, emailAccountId: str
  * List all email accounts (sending inboxes) connected to this Instantly workspace.
  * Used by the SDR settings screen in Lovable to pick their sending inbox.
  */
+async function getCachedEmailAccountIds(): Promise<string[]> {
+  if (_emailAccountsCache && Date.now() < _emailAccountsCache.expiresAt) {
+    return _emailAccountsCache.ids;
+  }
+  const accounts = await listEmailAccounts();
+  const ids = accounts.map((a) => a.id).filter(Boolean);
+  _emailAccountsCache = { ids, expiresAt: Date.now() + EMAIL_ACCOUNTS_TTL_MS };
+  return ids;
+}
+
 export async function listEmailAccounts(): Promise<InstantlyEmailAccount[]> {
   const client = getClient();
   logger.info('Fetching Instantly email accounts');
@@ -278,6 +293,35 @@ export async function removeLead(campaignId: string, email: string): Promise<voi
       return;
     }
     handleAxiosError(err, 'removeLead');
+  }
+}
+
+/**
+ * Reply to an email via Instantly's unibox reply API.
+ * Uses the Instantly email ID (email_id from the reply_received webhook).
+ * Docs: POST /api/v2/emails/reply
+ */
+export async function sendEmailReply(params: {
+  replyToUuid: string;  // Instantly email id (email_id from reply_received webhook)
+  eaccount:    string;  // Sending inbox e.g. "cd@hallowpartnershipteam.com"
+  subject:     string;
+  bodyText:    string;
+  bodyHtml?:   string;
+}): Promise<void> {
+  const client = getClient();
+  logger.info(`Sending reply to Instantly email ${params.replyToUuid} via ${params.eaccount}`);
+  try {
+    await client.post('/emails/reply', {
+      eaccount:      params.eaccount,
+      reply_to_uuid: params.replyToUuid,
+      subject:       params.subject,
+      body: {
+        html: params.bodyHtml ?? params.bodyText,
+        text: params.bodyText,
+      },
+    });
+  } catch (err) {
+    handleAxiosError(err, 'sendEmailReply');
   }
 }
 

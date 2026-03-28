@@ -8,6 +8,8 @@ import sequencesRouter from './routes/sequences';
 import enrollmentsRouter from './routes/enrollments';
 import callsRouter from './routes/calls';
 import contactsRouter from './routes/contacts';
+import emailsRouter from './routes/emails';
+import analyticsRouter from './routes/analytics';
 import { handleInstantlyWebhook } from './handlers/instantly-webhook';
 import { handleCallStatus, handleRecording } from './handlers/twilio-webhooks';
 import { createLogger } from './utils/logger';
@@ -51,6 +53,8 @@ app.use('/api/sequences',   sequencesRouter);
 app.use('/api/enrollments', enrollmentsRouter);
 app.use('/api/calls',       callsRouter);
 app.use('/api/contacts',    contactsRouter);
+app.use('/api/emails',      emailsRouter);
+app.use('/api/analytics',   analyticsRouter);
 
 // Instantly webhooks
 app.post('/webhooks/instantly', handleInstantlyWebhook);

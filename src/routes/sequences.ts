@@ -77,14 +77,13 @@ router.post('/:id/activate', async (req: Request, res: Response): Promise<void> 
       delay_days:  step.delay_days ?? 0,
     }));
 
-    // 6. Create Instantly campaign shell — inbox attached at enrollment time
+    // 6. Create Instantly campaign — all workspace inboxes attached automatically
     const campaignId = await createCampaign({
-      id:             sequence.id,
-      name:           sequence.name,
+      id:       sequence.id,
+      name:     sequence.name,
       steps,
       fromName,
       replyTo,
-      emailAccountId: null,   // set when first lead enrolls
     });
 
     // 7. Persist campaign ID + status in Supabase

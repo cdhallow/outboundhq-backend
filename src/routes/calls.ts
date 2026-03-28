@@ -119,11 +119,12 @@ router.post('/voice', async (req: Request, res: Response): Promise<void> => {
 
   // Update our DB record with the real Twilio CallSid now that it exists
   if (callId && CallSid) {
+    // Save twilio_call_sid separately from status — status has a strict DB enum
+    // and will be updated by the Twilio status webhook as the call progresses.
     const { error: updateErr } = await supabase
       .from('calls')
       .update({
         twilio_call_sid: CallSid,
-        status:          'in_progress',
         updated_at:      new Date().toISOString(),
       })
       .eq('id', callId);
@@ -134,6 +135,7 @@ router.post('/voice', async (req: Request, res: Response): Promise<void> => {
 <Response>
   <Dial callerId="${fromNumber}"
         record="record-from-answer"
+        recordingChannels="2"
         recordingStatusCallback="${backendUrl}/webhooks/twilio/recording"
         recordingStatusCallbackMethod="POST">
     <Number statusCallback="${backendUrl}/webhooks/twilio/status"
