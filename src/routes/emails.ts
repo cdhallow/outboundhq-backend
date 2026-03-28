@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { sendEmailReply } from '../services/instantly';
+import { sendEmailReply, listEmailAccounts } from '../services/instantly';
 import { logEmailMessage, supabase } from '../services/supabase';
 import { createLogger } from '../utils/logger';
 
@@ -112,6 +112,23 @@ router.get('/thread/:contactId', async (req: Request, res: Response): Promise<vo
     const error = err as Error;
     logger.error(`Failed to fetch thread for contact ${contactId}`, error);
     res.status(500).json({ error: 'Failed to fetch email thread', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// GET /api/emails/accounts
+// List all Instantly sending inboxes so the frontend can populate a
+// "Send from" dropdown in the reply composer.
+// ─────────────────────────────────────────────
+
+router.get('/accounts', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const accounts = await listEmailAccounts();
+    res.status(200).json({ accounts });
+  } catch (err: unknown) {
+    const error = err as Error;
+    logger.error('Failed to fetch email accounts', error);
+    res.status(500).json({ error: 'Failed to fetch email accounts', details: error.message });
   }
 });
 
