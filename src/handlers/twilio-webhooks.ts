@@ -34,23 +34,36 @@ export async function handleCallStatus(req: Request, res: Response): Promise<voi
       CallSid,
       CallStatus,
       CallDuration,
+      ParentCallSid,
     } = req.body as {
       CallSid: string;
       CallStatus: string;
       CallDuration?: string;
+      ParentCallSid?: string;
     };
 
-    logger.info(`Call status: ${CallSid} → ${CallStatus}`);
+    logger.info(`Call status: ${CallSid} → ${CallStatus}${ParentCallSid ? ` (parent: ${ParentCallSid})` : ''}`);
 
-    // Look up our call record by Twilio SID
-    const { data: call } = await supabase
+    // Look up our call record — try the direct SID first, then the parent SID.
+    // Status webhooks from the <Number> element use the child call SID, while
+    // we store the parent SID (from the browser SDK connection) in twilio_call_sid.
+    let { data: call } = await supabase
       .from('calls')
       .select('id')
       .eq('twilio_call_sid', CallSid)
       .maybeSingle();
 
+    if (!call && ParentCallSid) {
+      const { data: parentCall } = await supabase
+        .from('calls')
+        .select('id')
+        .eq('twilio_call_sid', ParentCallSid)
+        .maybeSingle();
+      call = parentCall;
+    }
+
     if (!call) {
-      logger.warn(`No call record found for Twilio SID: ${CallSid}`);
+      logger.warn(`No call record found for Twilio SID: ${CallSid}${ParentCallSid ? ` or parent ${ParentCallSid}` : ''}`);
       res.status(200).send('OK');
       return;
     }

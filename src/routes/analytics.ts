@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { supabase } from '../services/supabase';
-import { getCampaignAnalytics } from '../services/instantly';
 import { createLogger } from '../utils/logger';
 
 const router = Router();
@@ -87,32 +86,24 @@ router.get('/overview', async (req: Request, res: Response): Promise<void> => {
       .select('id', { count: 'exact', head: true })
       .eq('lead_tier', 'hot');
 
-    // ── Instantly campaign-level stats (best-effort — won't fail the whole response) ──
+    // ── Instantly campaign-level stats from our own engagements table ────────
+    // (Instantly V2 API does not expose a /campaigns/{id}/analytics endpoint)
     let instantlyCampaignStats = null;
     try {
-      const { data: sequences } = await supabase
-        .from('sequences')
-        .select('instantly_campaign_id')
-        .eq('status', 'active')
-        .not('instantly_campaign_id', 'is', null);
+      const { data: engRows } = await supabase
+        .from('engagements')
+        .select('engagement_type');
 
-      if (sequences && sequences.length > 0) {
-        const allStats = await Promise.all(
-          sequences.map((s) => getCampaignAnalytics(s.instantly_campaign_id!))
-        );
-
-        instantlyCampaignStats = allStats.reduce(
-          (acc, s) => ({
-            sent:    acc.sent    + (s?.sent    ?? 0),
-            opened:  acc.opened  + (s?.opened  ?? 0),
-            clicked: acc.clicked + (s?.clicked ?? 0),
-            replied: acc.replied + (s?.replied ?? 0),
-          }),
-          { sent: 0, opened: 0, clicked: 0, replied: 0 }
-        );
+      if (engRows) {
+        instantlyCampaignStats = {
+          sent:    engRows.filter((e) => e.engagement_type === 'email_sent').length,
+          opened:  engRows.filter((e) => e.engagement_type === 'email_opened').length,
+          clicked: engRows.filter((e) => e.engagement_type === 'email_clicked').length,
+          replied: engRows.filter((e) => e.engagement_type === 'email_replied').length,
+        };
       }
     } catch (campaignErr) {
-      logger.warn('Could not fetch Instantly campaign analytics', campaignErr);
+      logger.warn('Could not fetch campaign analytics from engagements table', campaignErr);
     }
 
     res.status(200).json({
@@ -140,7 +131,7 @@ router.get('/calls', async (req: Request, res: Response): Promise<void> => {
   try {
     let query = supabase
       .from('calls')
-      .select('id, status, outcome, duration_seconds, started_at, ended_at, user_id, has_recording: recording_url.not.is(null), has_transcript: transcript.not.is(null)');
+      .select('id, status, outcome, duration_seconds, started_at, ended_at, user_id, recording_url, transcript');
 
     if (userId) query = query.eq('user_id', userId);
     if (from)   query = query.gte('started_at', from);
@@ -149,7 +140,14 @@ router.get('/calls', async (req: Request, res: Response): Promise<void> => {
     const { data, error } = await query.order('started_at', { ascending: false });
     if (error) throw error;
 
-    res.status(200).json({ calls: data ?? [] });
+    // Add boolean convenience flags so the frontend doesn't need to null-check URLs
+    const calls = (data ?? []).map((c) => ({
+      ...c,
+      has_recording:  c.recording_url !== null,
+      has_transcript: c.transcript    !== null,
+    }));
+
+    res.status(200).json({ calls });
   } catch (err: unknown) {
     const error = err as Error;
     logger.error('Failed to fetch call analytics', error);
