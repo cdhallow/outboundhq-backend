@@ -297,6 +297,52 @@ router.get('/:id/status', async (req: Request, res: Response): Promise<void> => 
 });
 
 // ─────────────────────────────────────────────
+// GET /api/calls/contact/:contactId
+// Full call history for a contact — used by Contact detail view.
+// ─────────────────────────────────────────────
+
+router.get('/contact/:contactId', async (req: Request, res: Response): Promise<void> => {
+  const { contactId } = req.params;
+
+  try {
+    const { data: calls, error } = await supabase
+      .from('calls')
+      .select(`
+        id,
+        status,
+        outcome,
+        duration_seconds,
+        started_at,
+        ended_at,
+        from_number,
+        to_number,
+        recording_url,
+        has_recording:  recording_url,
+        has_transcript: transcript,
+        ai_summary,
+        user_id,
+        created_at
+      `)
+      .eq('contact_id', contactId)
+      .order('started_at', { ascending: false });
+
+    if (error) throw error;
+
+    const result = (calls ?? []).map((c) => ({
+      ...c,
+      has_recording:  c.has_recording  !== null,
+      has_transcript: c.has_transcript !== null,
+    }));
+
+    res.status(200).json({ calls: result });
+  } catch (err: unknown) {
+    const error = err as Error;
+    logger.error(`Failed to fetch call history for contact ${contactId}`, error);
+    res.status(500).json({ error: 'Failed to fetch call history', details: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
 // GET /api/calls/twiml
 // Twilio fetches this when the contact answers.
 // Plays a brief message, then bridges the SDR into the call.
