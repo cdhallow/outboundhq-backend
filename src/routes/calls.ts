@@ -38,36 +38,94 @@ router.get('/token', (req: Request, res: Response): void => {
 // ─────────────────────────────────────────────
 
 router.post('/initiate', async (req: Request, res: Response): Promise<void> => {
-  const { callId, contactPhone } = req.body as {
-    callId?: string;
+  const { callId, contactPhone, contactId, userId } = req.body as {
+    callId?:      string;
     contactPhone?: string;
+    contactId?:   string;
+    userId?:      string;
   };
 
-  if (!callId || !contactPhone) {
-    res.status(400).json({ error: 'callId and contactPhone are required' });
+  if (!contactPhone) {
+    res.status(400).json({ error: 'contactPhone is required' });
     return;
   }
 
-  logger.info(`Preparing call record ${callId} → ${contactPhone}`);
+  logger.info(`Initiating call → ${contactPhone}`);
 
   try {
-    const { data: call, error: fetchError } = await supabase
-      .from('calls')
-      .select('id, status')
-      .eq('id', callId)
-      .single();
+    let resolvedCallId = callId;
 
-    if (fetchError || !call) {
-      res.status(404).json({ error: 'Call record not found' });
+    if (resolvedCallId) {
+      // Caller supplied an existing callId — look it up
+      const { data: existing } = await supabase
+        .from('calls')
+        .select('id, status')
+        .eq('id', resolvedCallId)
+        .maybeSingle();
+
+      if (existing && ['in_progress', 'ringing'].includes(existing.status)) {
+        res.status(409).json({ error: `Call is already ${existing.status}` });
+        return;
+      }
+
+      // If not found (e.g. CallProvider passed a client-generated UUID), create it
+      if (!existing) {
+        const { data: created, error: createErr } = await supabase
+          .from('calls')
+          .insert({
+            id:          resolvedCallId,
+            contact_id:  contactId  ?? null,
+            user_id:     userId     ?? null,
+            status:      'ringing',
+            to_number:   contactPhone,
+            from_number: process.env.TWILIO_PHONE_NUMBER ?? null,
+            started_at:  new Date().toISOString(),
+            created_at:  new Date().toISOString(),
+            updated_at:  new Date().toISOString(),
+          })
+          .select('id')
+          .single();
+
+        if (createErr || !created) {
+          logger.error('Failed to create call record', createErr);
+          res.status(500).json({ error: 'Failed to create call record' });
+          return;
+        }
+
+        logger.info(`Created call record ${resolvedCallId} for ${contactPhone}`);
+        res.status(200).json({ success: true, callId: resolvedCallId });
+        return;
+      }
+    } else {
+      // No callId provided — create a fresh record and return the new ID
+      const { data: created, error: createErr } = await supabase
+        .from('calls')
+        .insert({
+          contact_id:  contactId  ?? null,
+          user_id:     userId     ?? null,
+          status:      'ringing',
+          to_number:   contactPhone,
+          from_number: process.env.TWILIO_PHONE_NUMBER ?? null,
+          started_at:  new Date().toISOString(),
+          created_at:  new Date().toISOString(),
+          updated_at:  new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+
+      if (createErr || !created) {
+        logger.error('Failed to create call record', createErr);
+        res.status(500).json({ error: 'Failed to create call record' });
+        return;
+      }
+
+      resolvedCallId = created.id;
+      logger.info(`Created call record ${resolvedCallId} for ${contactPhone}`);
+      res.status(200).json({ success: true, callId: resolvedCallId });
       return;
     }
 
-    if (['in_progress', 'ringing'].includes(call.status)) {
-      res.status(409).json({ error: `Call is already ${call.status}` });
-      return;
-    }
-
-    // Stage the record — twilio_call_sid is set by /voice when Twilio connects
+    // Existing record found — stage it as ringing
     await supabase
       .from('calls')
       .update({
@@ -77,13 +135,13 @@ router.post('/initiate', async (req: Request, res: Response): Promise<void> => {
         started_at:  new Date().toISOString(),
         updated_at:  new Date().toISOString(),
       })
-      .eq('id', callId);
+      .eq('id', resolvedCallId);
 
-    // Return callId — the browser SDK uses this when calling device.connect()
-    res.status(200).json({ success: true, callId });
+    logger.info(`Staged existing call record ${resolvedCallId} → ringing`);
+    res.status(200).json({ success: true, callId: resolvedCallId });
   } catch (err: unknown) {
     const error = err as Error;
-    logger.error(`Failed to prepare call ${callId}`, error);
+    logger.error(`Failed to initiate call to ${contactPhone}`, error);
     res.status(500).json({ error: 'Failed to initiate call', details: error.message });
   }
 });
