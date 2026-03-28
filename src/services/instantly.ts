@@ -338,6 +338,45 @@ export async function sendEmailReply(params: {
   }
 }
 
+export interface InstantlyEmailContent {
+  id:       string;
+  subject:  string | null;
+  bodyText: string | null;
+  bodyHtml: string | null;
+  fromAddress: string | null;
+  toAddress:   string | null;
+  threadId:    string | null;
+  sentAt:      string | null;
+}
+
+/**
+ * Fetch the full content of a sent email by its Instantly message ID.
+ * Used after email_sent webhook fires to store body in email_messages.
+ * Returns null (not throws) on 404 / any fetch failure so the caller
+ * can gracefully store partial data without crashing.
+ */
+export async function getEmailContent(emailId: string): Promise<InstantlyEmailContent | null> {
+  const client = getClient();
+  try {
+    const { data } = await client.get(`/emails/${emailId}`);
+    return {
+      id:          data?.id       ?? emailId,
+      subject:     data?.subject  ?? null,
+      bodyText:    data?.body?.text ?? data?.body_text ?? null,
+      bodyHtml:    data?.body?.html ?? data?.body_html ?? null,
+      fromAddress: data?.from_address ?? data?.eaccount ?? null,
+      toAddress:   data?.to_address   ?? data?.lead_email ?? null,
+      threadId:    data?.thread_id    ?? null,
+      sentAt:      data?.timestamp    ?? data?.sent_at ?? null,
+    };
+  } catch (err) {
+    // Non-fatal — log and return null so caller can store partial data
+    const status = (err as AxiosError)?.response?.status;
+    logger.warn(`Could not fetch email content for ${emailId} (HTTP ${status ?? 'unknown'})`);
+    return null;
+  }
+}
+
 /**
  * Fetch aggregated send/open/click/reply counts for a campaign.
  * V2 endpoint: GET /campaigns/analytics?id=<campaign_id>

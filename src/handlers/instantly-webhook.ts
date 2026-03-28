@@ -9,6 +9,7 @@ import {
   markContactEmailInvalid,
   markContactUnsubscribedAt,
 } from '../services/supabase';
+import { getEmailContent } from '../services/instantly';
 import { createLogger } from '../utils/logger';
 
 const logger = createLogger('InstantlyWebhook');
@@ -214,6 +215,7 @@ async function handleEmailSent(event: InstantlyEvent): Promise<void> {
   const enrollment = await requireEnrollment(event);
   if (!enrollment) return;
 
+  // Log the engagement event
   await logEngagement({
     contactId:      enrollment.contact_id,
     sequenceId:     enrollment.sequence_id,
@@ -222,7 +224,46 @@ async function handleEmailSent(event: InstantlyEvent): Promise<void> {
     metadata:       sanitise(event),
   });
 
-  logger.info(`email_sent: logged for enrollment ${enrollment.id}`);
+  // Store the outbound email in email_messages for conversation threading.
+  // Try to fetch the full body from Instantly — gracefully degrade to metadata-only.
+  const emailId = event.email_id ?? null;
+  let bodyText:    string | null = null;
+  let bodyHtml:    string | null = null;
+  let threadId:    string | null = event.thread_id ?? null;
+  let sentAt:      string | null = event.timestamp  ?? new Date().toISOString();
+  let fromAddress: string | null = event.email_account ?? null;
+
+  if (emailId) {
+    const content = await getEmailContent(emailId);
+    if (content) {
+      bodyText    = content.bodyText;
+      bodyHtml    = content.bodyHtml;
+      threadId    = content.threadId  ?? threadId;
+      sentAt      = content.sentAt    ?? sentAt;
+      fromAddress = content.fromAddress ?? fromAddress;
+    }
+  }
+
+  const leadEmail = normaliseEmail(event.lead_email ?? event.email ?? '');
+
+  await logEmailMessage({
+    contactId:           enrollment.contact_id,
+    enrollmentId:        enrollment.id,
+    sequenceId:          enrollment.sequence_id,
+    direction:           'outbound',
+    subject:             event.email_subject ?? null,
+    bodyText,
+    bodyHtml,
+    fromAddress,
+    toAddress:           leadEmail || null,
+    instantlyMessageId:  emailId,
+    instantlyCampaignId: event.campaign_id ?? null,
+    threadId,
+    status:              'delivered',
+    sentAt,
+  });
+
+  logger.info(`email_sent: logged + stored outbound message for enrollment ${enrollment.id}${bodyText ? '' : ' (no body — Instantly API may not expose it)'}`);
 }
 
 async function handleLeadInterested(event: InstantlyEvent): Promise<void> {

@@ -440,28 +440,38 @@ export interface LogEmailMessageInput {
 }
 
 export async function logEmailMessage(input: LogEmailMessageInput): Promise<void> {
-  const { error } = await supabase
-    .from('email_messages')
-    .insert([{
-      contact_id:             input.contactId,
-      enrollment_id:          input.enrollmentId          ?? null,
-      sequence_id:            input.sequenceId            ?? null,
-      assigned_sdr_id:        input.assignedSdrId         ?? null,
-      direction:              input.direction,
-      subject:                input.subject               ?? null,
-      body_text:              input.bodyText              ?? null,
-      body_html:              input.bodyHtml              ?? null,
-      from_address:           input.fromAddress           ?? null,
-      to_address:             input.toAddress             ?? null,
-      instantly_message_id:   input.instantlyMessageId    ?? null,
-      instantly_campaign_id:  input.instantlyCampaignId   ?? null,
-      thread_id:              input.threadId              ?? null,
-      status:                 input.status                ?? 'delivered',
-      sent_at:                input.sentAt                ?? null,
-      received_at:            input.receivedAt            ?? null,
-    }]);
+  const row = {
+    contact_id:             input.contactId,
+    enrollment_id:          input.enrollmentId          ?? null,
+    sequence_id:            input.sequenceId            ?? null,
+    assigned_sdr_id:        input.assignedSdrId         ?? null,
+    direction:              input.direction,
+    subject:                input.subject               ?? null,
+    body_text:              input.bodyText              ?? null,
+    body_html:              input.bodyHtml              ?? null,
+    from_address:           input.fromAddress           ?? null,
+    to_address:             input.toAddress             ?? null,
+    instantly_message_id:   input.instantlyMessageId    ?? null,
+    instantly_campaign_id:  input.instantlyCampaignId   ?? null,
+    thread_id:              input.threadId              ?? null,
+    status:                 input.status                ?? 'delivered',
+    sent_at:                input.sentAt                ?? null,
+    received_at:            input.receivedAt            ?? null,
+  };
 
-  if (error) throw error;
+  // Upsert on instantly_message_id so Instantly webhook retries don't
+  // create duplicate rows. Falls back to plain insert when no message ID.
+  if (input.instantlyMessageId) {
+    const { error } = await supabase
+      .from('email_messages')
+      .upsert([row], { onConflict: 'instantly_message_id', ignoreDuplicates: false });
+    if (error) throw error;
+  } else {
+    const { error } = await supabase
+      .from('email_messages')
+      .insert([row]);
+    if (error) throw error;
+  }
 }
 
 export interface EmailMessage {
